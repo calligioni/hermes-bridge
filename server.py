@@ -40,8 +40,8 @@ _HISTORY: list[dict] = []  # [{"role": "user"/"assistant", "content": "..."}]
 _MAX_HISTORY_LEN = 20      # 10 turnos
 
 
-def _call_remote_hermes(prompt: str, project_dir: str = "") -> str:
-    """Faz POST para o servidor remoto e retorna a resposta."""
+def _call_remote_hermes(prompt: str, project_dir: str = "") -> tuple[str, str]:
+    """Faz POST para o servidor remoto e retorna (resposta, cache_status)."""
     url = f"{HERMES_API_URL}/ask"
     payload = json.dumps({
         "prompt": prompt,
@@ -57,19 +57,21 @@ def _call_remote_hermes(prompt: str, project_dir: str = "") -> str:
 
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
+            cache_status = resp.headers.get("X-Cache", "UNKNOWN")
             data = json.loads(resp.read().decode("utf-8"))
-            return data.get("response", "[ERRO] Resposta vazia do servidor remoto")
+            response = data.get("response", "[ERRO] Resposta vazia do servidor remoto")
+            return response, cache_status
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8") if e.fp else ""
-        return f"[ERRO] Servidor remoto retornou {e.code}: {body[:500]}"
+        return f"[ERRO] Servidor remoto retornou {e.code}: {body[:500]}", "ERROR"
     except urllib.error.URLError as e:
         return (
             f"[ERRO] Não consegui conectar ao servidor remoto em {HERMES_API_URL}. "
             f"Verifique se a máquina remota está acessível e o servidor está rodando. "
             f"Detalhes: {e.reason}"
-        )
+        ), "ERROR"
     except Exception as e:
-        return f"[ERRO] Falha na comunicação com servidor remoto: {e}"
+        return f"[ERRO] Falha na comunicação com servidor remoto: {e}", "ERROR"
 
 
 def _build_prompt(question: str, extra_context: str = "") -> str:
@@ -119,7 +121,11 @@ def ask_hermes(
     global _HISTORY
 
     full_prompt = _build_prompt(question, context)
-    response = _call_remote_hermes(full_prompt, project_dir)
+    response, cache_status = _call_remote_hermes(full_prompt, project_dir)
+
+    # Adiciona indicador de cache na resposta
+    if cache_status == "HIT":
+        response = f"⚡ **(resposta em cache)**\n\n{response}"
 
     _HISTORY.append({"role": "user", "content": question})
     _HISTORY.append({"role": "assistant", "content": response})
