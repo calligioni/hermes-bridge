@@ -7,6 +7,7 @@ Expõe um endpoint HTTP que recebe perguntas e retorna respostas do Hermes.
 
 ✅ Cache integrado — perguntas repetidas respondem instantaneamente.
 ✅ TTL configurável — respostas expiram após X minutos.
+✅ Controle de versão — header X-Server-Version em toda resposta.
 
 Uso:
     python3 remote_hermes_api.py
@@ -21,16 +22,24 @@ import subprocess
 import time
 from collections import OrderedDict
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 
 HERMES_BIN = os.environ.get("HERMES_BIN", "hermes")
 MAX_TURNS = int(os.environ.get("HERMES_MAX_TURNS", "20"))
 API_PORT = int(os.environ.get("HERMES_API_PORT", "8655"))
-CACHE_TTL_MINUTES = int(os.environ.get("HERMES_CACHE_TTL", "60"))  # 1 hora por padrão
+CACHE_TTL_MINUTES = int(os.environ.get("HERMES_CACHE_TTL", "60"))
 CACHE_MAX_SIZE = int(os.environ.get("HERMES_CACHE_SIZE", "100"))
 
+# ─── Versão do servidor ───────────────────────────────────────────────────────
+VERSION_FILE = Path(__file__).parent / "VERSION"
+SERVER_VERSION = "0.0.0"
+try:
+    if VERSION_FILE.exists():
+        SERVER_VERSION = VERSION_FILE.read_text().strip()
+except Exception:
+    pass
+
 # ─── Cache em memória ─────────────────────────────────────────────────────────
-# Chave: sha256(prompt + "|" + project_dir)
-# Valor: {"response": str, "timestamp": float}
 _cache: OrderedDict[str, dict] = OrderedDict()
 
 
@@ -50,13 +59,11 @@ def _get_cached(prompt: str, project_dir: str) -> str | None:
         del _cache[key]
         return None
 
-    # Move para o fim (LRU — most recently used)
     _cache.move_to_end(key)
     return entry["response"]
 
 
 def _set_cached(prompt: str, project_dir: str, response: str) -> None:
-    # Não cacheia erros
     if response.startswith("[ERRO]"):
         return
 
@@ -64,7 +71,6 @@ def _set_cached(prompt: str, project_dir: str, response: str) -> None:
     _cache[key] = {"response": response, "timestamp": time.time()}
     _cache.move_to_end(key)
 
-    # Evita crescimento ilimitado
     while len(_cache) > CACHE_MAX_SIZE:
         _cache.popitem(last=False)
 
@@ -104,7 +110,6 @@ def call_hermes(prompt: str, project_dir: str = "") -> str:
 
     output = result.stdout.strip()
 
-    # Remove cabeçalho "session_id:" que o --quiet às vezes imprime
     if "session_id:" in output:
         lines = output.splitlines()
         filtered = []
@@ -130,20 +135,31 @@ def call_hermes(prompt: str, project_dir: str = "") -> str:
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args) -> None:
-        pass  # Silencia logs de acesso (barulho no terminal)
+        pass
+
+    def _send_json(self, status: int, data: dict, extra_headers: dict | None = None) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("X-Server-Version", SERVER_VERSION)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        if extra_headers:
+            for k, v in extra_headers.items():
+                self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
 
     def do_GET(self) -> None:
         if self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "cache": _cache_stats()}).encode())
+            self._send_json(200, {
+                "status": "ok",
+                "version": SERVER_VERSION,
+                "cache": _cache_stats(),
+            })
+        elif self.path == "/version":
+            self._send_json(200, {"version": SERVER_VERSION})
         elif self.path == "/cache/clear":
             _cache.clear()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "cache cleared"}).encode())
+            self._send_json(200, {"status": "cache cleared"})
         else:
             self.send_response(404)
             self.end_headers()
@@ -159,48 +175,33 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8")
             data = json.loads(body)
         except (ValueError, json.JSONDecodeError) as e:
-            self.send_response(400)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": f"JSON inválido: {e}"}).encode())
+            self._send_json(400, {"error": f"JSON inválido: {e}"})
             return
 
         prompt = data.get("prompt", "")
         project_dir = data.get("project_dir", "")
 
         if not prompt:
-            self.send_response(400)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": "Campo 'prompt' é obrigatório"}).encode())
+            self._send_json(400, {"error": "Campo 'prompt' é obrigatório"})
             return
 
         # Verifica cache
         cached = _get_cached(prompt, project_dir)
         if cached is not None:
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("X-Cache", "HIT")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"response": cached, "cached": True}).encode())
+            self._send_json(200, {"response": cached, "cached": True, "version": SERVER_VERSION}, extra_headers={"X-Cache": "HIT"})
             return
 
         # Chama Hermes
         response = call_hermes(prompt, project_dir)
         _set_cached(prompt, project_dir, response)
 
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("X-Cache", "MISS")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.end_headers()
-        self.wfile.write(json.dumps({"response": response, "cached": False}).encode())
+        self._send_json(200, {"response": response, "cached": False, "version": SERVER_VERSION}, extra_headers={"X-Cache": "MISS"})
 
 
 def main() -> None:
-    print(f"🚀 Hermes Remote API rodando em http://0.0.0.0:{API_PORT}")
+    print(f"🚀 Hermes Remote API v{SERVER_VERSION} rodando em http://0.0.0.0:{API_PORT}")
     print(f"   Health check:   curl http://localhost:{API_PORT}/health")
+    print(f"   Versão:         curl http://localhost:{API_PORT}/version")
     print(f"   Limpar cache:   curl http://localhost:{API_PORT}/cache/clear")
     print(f"   Hermes bin:     {HERMES_BIN}")
     print(f"   Cache TTL:      {CACHE_TTL_MINUTES} minutos")
