@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """
-Teste standalone do Hermes Bridge (MCP 2.x)
-===========================================
-Valida que o server.py inicializa corretamente e responde a uma tool call.
+Teste standalone do Hermes Bridge (MCP 2.x) — Cliente Remoto
+===============================================================
+
+Este teste verifica se o server.py (cliente MCP) consegue se comunicar com
+o remote_hermes_api.py (servidor HTTP remoto).
+
+IMPORTANTE: O servidor remoto deve estar rodando antes de executar este teste:
+    python3 remote_hermes_api.py
+
+Ou, na máquina remota (10.250.240.206):
+    HERMES_API_PORT=8655 python3 remote_hermes_api.py
 """
 
 import json
@@ -29,9 +37,26 @@ def read_line(proc) -> dict | None:
 
 
 def main() -> int:
-    print("🚀 Testando Hermes Bridge MCP Server...")
+    print("🚀 Testando Hermes Bridge MCP Server (Cliente Remoto)...")
     print("=" * 60)
 
+    # Verifica se o servidor remoto está acessível
+    print("📡 Verificando conectividade com servidor remoto...")
+    import urllib.request
+    try:
+        req = urllib.request.Request("http://10.250.240.206:8655/health", method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("status") == "ok":
+                print("   ✅ Servidor remoto respondendo!")
+            else:
+                print(f"   ⚠️  Health check retornou: {data}")
+    except Exception as e:
+        print(f"   ❌ Não consegui conectar ao servidor remoto: {e}")
+        print("   📝 Certifique-se de que o remote_hermes_api.py está rodando em 10.250.240.206:8655")
+        return 1
+
+    # Inicia o server.py
     proc = subprocess.Popen(
         [sys.executable, "server.py"],
         stdin=subprocess.PIPE,
@@ -41,7 +66,7 @@ def main() -> int:
     )
 
     # 1) initialize
-    print("📤 Enviando initialize...")
+    print("\n📤 Enviando initialize...")
     send_line(proc, {
         "jsonrpc": "2.0",
         "id": 1,
@@ -80,6 +105,7 @@ def main() -> int:
 
     # 4) Chama ask_hermes
     print("\n📤 Chamando ask_hermes (pode demorar ~30s)...")
+    print("   Enviando pergunta para o servidor remoto 10.250.240.206:8655...")
     send_line(proc, {
         "jsonrpc": "2.0",
         "id": 3,
@@ -102,7 +128,7 @@ def main() -> int:
     result = resp.get("result", {})
     contents = result.get("content", [])
     text = contents[0].get("text", "") if contents else ""
-    print(f"📥 Resposta do Hermes:\n{'─' * 40}")
+    print(f"📥 Resposta do Hermes (via servidor remoto):\n{'─' * 40}")
     print(text[:800] + ("..." if len(text) > 800 else ""))
     print("─" * 40)
 
@@ -113,13 +139,16 @@ def main() -> int:
     except subprocess.TimeoutExpired:
         proc.kill()
 
-    # stderr
     stderr = proc.stderr.read().decode()
     if stderr:
         print(f"\n⚠️  Stderr:\n{stderr[:500]}")
 
-    print("\n✅ Teste finalizado com sucesso!" if text else "\n❌ Teste falhou — resposta vazia.")
-    return 0 if text else 1
+    if text and not text.startswith("[ERRO]"):
+        print("\n✅ Teste passou! MCP Server conectou ao Hermes remoto com sucesso!")
+        return 0
+    else:
+        print("\n❌ Teste falhou — verifique se o servidor remoto está rodando.")
+        return 1
 
 
 if __name__ == "__main__":

@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 """
-Hermes Bridge — Script de Instalação Automática (macOS/Linux/Windows)
-=====================================================================
+Hermes Bridge — Script de Instalação Automática (Cliente Remoto)
+=================================================================
 
-Instala e configura o Hermes Bridge MCP Server para o Claude Code.
+Instala o Hermes Bridge MCP Server na MÁQUINA CLIENTE (Mac/Windows/Linux).
+Este script NÃO instala o Hermes — ele configura o cliente para se conectar
+a um servidor remoto onde o Hermes está rodando.
 
-✅ Idempotente — pode rodar quantas vezes quiser (atualiza o que existe)
-✅ macOS/Linux/Windows — detecta o SO automaticamente
-✅ Não-interativo — com --yes ou --force, não pergunta nada
-✅ Pergunta automaticamente os diretórios dos projetos
+Arquitetura:
+    ┌─────────────────┐         HTTP POST        ┌─────────────────────────┐
+    │  Máquina Cliente│  ──────────────────────▶ │  Máquina Remota         │
+    │  (Mac/Win/Linux)│    pergunta → resposta   │  (10.250.240.206)      │
+    │                 │                         │  Hermes + Código Fonte  │
+    │  Claude Code ──▶│    MCP tool ask_hermes   │  remote_hermes_api.py   │
+    │  server.py      │  ──────────────────────▶ │  (servidor HTTP)        │
+    └─────────────────┘                         └─────────────────────────┘
 
-Uso interativo:
-    python3 install.py
-
-Uso automático (Claude Code):
-    python3 install.py --yes
-
-Ou via Claude Code:
-    "Roda o install.py do repo calligioni/hermes-bridge com --yes"
+Uso:
+    python3 install.py                    # Modo interativo (pergunta IP)
+    python3 install.py --yes              # Modo automático (usa IP padrão)
+    python3 install.py --yes --remote-ip 10.250.240.206  # Especifica IP
 """
 
 from __future__ import annotations
@@ -61,27 +63,7 @@ def ask_yes_no(question: str, default: bool = True, auto_yes: bool = False) -> b
     return answer in ('y', 'yes', 's', 'sim')
 
 
-def find_hermes() -> str | None:
-    """Procura o binário hermes no PATH e em locais comuns."""
-    hermes_path = shutil.which("hermes")
-    if hermes_path:
-        return hermes_path
-    home = Path.home()
-    candidates = [
-        home / ".local" / "bin" / "hermes",
-        home / "bin" / "hermes",
-        Path("/usr/local/bin/hermes"),
-        Path("/usr/bin/hermes"),
-        Path("/opt/hermes/bin/hermes"),
-    ]
-    for p in candidates:
-        if p.exists():
-            return str(p)
-    return None
-
-
 def get_system() -> str:
-    """Retorna 'macos', 'linux' ou 'windows'."""
     s = platform.system().lower()
     if s == "darwin":
         return "macos"
@@ -103,38 +85,16 @@ def get_claude_config_path() -> Path:
 
 
 def get_venv_python(venv_dir: Path) -> Path:
-    """Retorna o caminho do Python no virtualenv para o SO atual."""
     if get_system() == "windows":
         return venv_dir / "Scripts" / "python.exe"
     return venv_dir / "bin" / "python"
 
 
-def get_path_separator() -> str:
-    """Retorna o separador de PATH do SO."""
-    return ";" if get_system() == "windows" else ":"
-
-
-def detect_project_dirs() -> dict[str, str | None]:
-    """Tenta detectar automaticamente os diretórios dos projetos."""
-    home = Path.home()
-    projects: dict[str, str | None] = {
-        "KPL": None,
-        "OnclickERP": None,
-        "apiecomm": None,
-    }
-    for name in projects:
-        if (home / name).exists():
-            projects[name] = str(home / name)
-    return projects
-
-
 def ensure_dir(path: Path) -> None:
-    """Cria diretórios intermediários se não existirem."""
     path.mkdir(parents=True, exist_ok=True)
 
 
 def install_deps(venv_python: Path, install_dir: Path) -> bool:
-    """Instala/atualiza dependências no virtualenv."""
     req_file = install_dir / "requirements.txt"
     if not req_file.exists():
         print(f"   ❌ {req_file} não encontrado")
@@ -147,10 +107,6 @@ def install_deps(venv_python: Path, install_dir: Path) -> bool:
 
 
 def update_repo(install_dir: Path, repo_url: str, auto_yes: bool) -> bool:
-    """
-    Garante que o repositório está clonado e atualizado.
-    Se já existe: faz git pull. Se não: clona.
-    """
     if install_dir.exists() and (install_dir / ".git").exists():
         print(f"   📦 Repositório já existe em {install_dir}")
         print("   🔄 Fazendo git pull para atualizar...")
@@ -162,12 +118,11 @@ def update_repo(install_dir: Path, repo_url: str, auto_yes: bool) -> bool:
             print("   ✅ Repositório atualizado")
         return True
     elif install_dir.exists():
-        # Diretório existe mas não é um git repo
         if not auto_yes:
             if ask_yes_no(f"   {install_dir} existe mas não é um git repo. Remover?", default=True, auto_yes=auto_yes):
                 shutil.rmtree(install_dir)
             else:
-                print("   ❌ Instalação cancelada — diretório existe e não é git repo")
+                print("   ❌ Cancelado — diretório existe e não é git repo")
                 return False
         else:
             print(f"   🔄 Removendo diretório existente (modo automático)...")
@@ -182,18 +137,12 @@ def update_repo(install_dir: Path, repo_url: str, auto_yes: bool) -> bool:
     return True
 
 
-def ensure_venv(venv_dir: Path, auto_yes: bool) -> bool:
-    """
-    Garante que o virtualenv existe.
-    Se existe: mantém. Se não: cria.
-    Com --force: recria.
-    """
+def ensure_venv(venv_dir: Path) -> bool:
     if venv_dir.exists():
         venv_python = get_venv_python(venv_dir)
         if venv_python.exists():
             print(f"   ✅ Virtualenv já existe em {venv_dir}")
             return True
-        # Diretório existe mas Python não — corrompido
         print(f"   ⚠️  Virtualenv parece corrompido, recriando...")
         shutil.rmtree(venv_dir)
     else:
@@ -207,24 +156,13 @@ def ensure_venv(venv_dir: Path, auto_yes: bool) -> bool:
     return True
 
 
-def write_claude_config(config_path: Path, venv_python: Path, install_dir: Path, hermes_dir: str) -> None:
+def write_claude_config(config_path: Path, venv_python: Path, install_dir: Path, remote_url: str) -> None:
     """Escreve (ou atualiza) o claude_desktop_config.json."""
-    # PATH: inclui o diretório do hermes + PATH atual
-    sep = get_path_separator()
-    path_parts = list(dict.fromkeys(
-        [p for p in os.environ.get("PATH", "").split(sep) if p]
-    ))
-    if hermes_dir and hermes_dir not in path_parts:
-        path_parts.insert(0, hermes_dir)
-    path_env = sep.join(path_parts)
-
     new_entry = {
         "command": str(venv_python),
         "args": [str(install_dir / "server.py")],
         "env": {
-            "HERMES_BIN": "hermes",
-            "HERMES_MAX_TURNS": "20",
-            "PATH": path_env,
+            "HERMES_API_URL": remote_url,
         }
     }
 
@@ -240,7 +178,6 @@ def write_claude_config(config_path: Path, venv_python: Path, install_dir: Path,
     if "mcpServers" not in config:
         config["mcpServers"] = {}
 
-    # Se já existe hermes-bridge, atualiza; senão, cria
     config["mcpServers"]["hermes-bridge"] = new_entry
 
     ensure_dir(config_path.parent)
@@ -248,26 +185,44 @@ def write_claude_config(config_path: Path, venv_python: Path, install_dir: Path,
         json.dump(config, f, indent=2)
 
 
+def test_remote_connection(remote_url: str) -> bool:
+    """Testa se o servidor remoto está acessível."""
+    import urllib.request
+    health_url = f"{remote_url}/health"
+    try:
+        req = urllib.request.Request(health_url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            return data.get("status") == "ok"
+    except Exception:
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Instala o Hermes Bridge MCP Server para Claude Code"
+        description="Instala o Hermes Bridge MCP Server (cliente remoto) para Claude Code"
     )
     parser.add_argument("--yes", "-y", action="store_true",
                         help="Responde 'sim' para todas as perguntas (modo automático)")
     parser.add_argument("--force", "-f", action="store_true",
-                        help="Força reinstalação completa (remove e recria)")
+                        help="Força reinstalação completa")
+    parser.add_argument("--remote-ip", default="10.250.240.206",
+                        help="IP da máquina remota onde o Hermes está rodando (padrão: 10.250.240.206)")
+    parser.add_argument("--remote-port", default="8655",
+                        help="Porta do servidor remoto (padrão: 8655)")
     args = parser.parse_args()
 
     auto_yes = args.yes or args.force
+    remote_url = f"http://{args.remote_ip}:{args.remote_port}"
 
     print("""
 ╔══════════════════════════════════════════════════════════════╗
-║     🔗 Hermes Bridge — Instalador Automático                 ║
-║     Conecta Claude Code ao Hermes Agent                     ║
+║     🔗 Hermes Bridge — Instalador Automático (Cliente)         ║
+║     Conecta Claude Code ao Hermes remoto                    ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
-    total_steps = 8
+    total_steps = 7
     system = get_system()
     print(f"   SO detectado: {system.upper()}")
 
@@ -300,73 +255,59 @@ def main() -> int:
     print(f"   ✅ Git: {git_result.stdout.strip()}")
 
     # ═══════════════════════════════════════════════════════════
-    # PASSO 4: Verificar Hermes
+    # PASSO 4: Configurar servidor remoto
     # ═══════════════════════════════════════════════════════════
-    print_step(4, total_steps, "Verificando Hermes Agent")
-    hermes_path = find_hermes()
-    hermes_dir = ""
-    if hermes_path:
-        print(f"   ✅ Hermes: {hermes_path}")
-        hermes_dir = str(Path(hermes_path).parent)
+    print_step(4, total_steps, "Configurando servidor remoto")
+    print("   Este MCP Server é um CLIENTE — ele se conecta a um servidor remoto")
+    print("   onde o Hermes está instalado com acesso ao código fonte.")
+    print()
+
+    if auto_yes:
+        print(f"   Modo automático: usando servidor remoto em {remote_url}")
     else:
-        print("   ❌ Hermes NÃO encontrado.")
-        if auto_yes:
-            print("   ⚠️  Modo automático: assumindo ~/.local/bin")
-            hermes_dir = str(Path.home() / ".local" / "bin")
-        else:
-            if ask_yes_no("   Hermes não encontrado. Deseja continuar?", default=False):
-                hermes_dir = ask("Diretório do hermes", default=str(Path.home() / ".local" / "bin"))
-            else:
-                print("   🛑 Cancelado. Instale o Hermes: https://hermes-agent.nousresearch.com/docs/")
+        print(f"   Servidor remoto padrão: {remote_url}")
+        custom_ip = ask("Digite o IP da máquina remota (ou Enter para usar o padrão)", default=args.remote_ip)
+        custom_port = ask("Digite a porta (ou Enter para usar o padrão)", default=args.remote_port)
+        remote_url = f"http://{custom_ip}:{custom_port}"
+        print(f"   Servidor remoto configurado: {remote_url}")
+
+    # Testa conectividade
+    print(f"   🌐 Testando conexão com {remote_url}...")
+    if test_remote_connection(remote_url):
+        print("   ✅ Servidor remoto está ONLINE e respondendo!")
+    else:
+        print(f"   ⚠️  Não consegui conectar a {remote_url}")
+        print("   Isso é NORMAL se o servidor ainda não foi iniciado.")
+        print()
+        print("   📝 INSTRUÇÕES PARA O ADMIN DA MÁQUINA REMOTA:")
+        print("      1. Acesse a máquina remota (ex: via SSH)")
+        print(f"      2. Clone o repo: git clone https://github.com/calligioni/hermes-bridge.git")
+        print("      3. Rode o servidor: python3 remote_hermes_api.py")
+        print(f"      4. O servidor vai escutar em 0.0.0.0:{args.remote_port}")
+        print()
+        if not auto_yes:
+            if not ask_yes_no("Deseja continuar a instalação mesmo assim?", default=True):
+                print("   🛑 Cancelado.")
                 return 1
 
     # ═══════════════════════════════════════════════════════════
-    # PASSO 5: Diretórios dos projetos
+    # PASSO 5: Clonar/Atualizar repositório e criar venv
     # ═══════════════════════════════════════════════════════════
-    print_step(5, total_steps, "Configurando diretórios dos projetos")
-    print("   O Hermes precisa acessar os códigos fonte.")
-    detected = detect_project_dirs()
-    project_dirs: dict[str, str] = {}
-    for name, default_path in detected.items():
-        if default_path:
-            print(f"   ✅ {name}: encontrado em {default_path}")
-            if auto_yes or ask_yes_no(f"   Confirmar {name}?", default=True, auto_yes=auto_yes):
-                project_dirs[name] = default_path
-            else:
-                custom = ask(f"   Caminho para {name}", default="")
-                if custom:
-                    project_dirs[name] = custom
-        else:
-            print(f"   ❓ {name}: não encontrado")
-            if auto_yes:
-                print("   (pulando — modo automático)")
-            else:
-                custom = ask(f"   Caminho para {name} (vazio = pular)", default="")
-                if custom:
-                    project_dirs[name] = custom
-
-    # ═══════════════════════════════════════════════════════════
-    # PASSO 6: Clonar/Atualizar repositório e criar venv
-    # ═══════════════════════════════════════════════════════════
-    print_step(6, total_steps, "Instalando Hermes Bridge")
+    print_step(5, total_steps, "Instalando Hermes Bridge")
     repo_url = "https://github.com/calligioni/hermes-bridge.git"
     install_dir = Path.home() / "hermes-bridge"
     venv_dir = install_dir / ".venv"
 
-    # Se --force, remove tudo antes
     if args.force and install_dir.exists():
-        print(f"   🔄 --force ativo: removendo {install_dir} ...")
+        print(f"   🔄 --force: removendo {install_dir} ...")
         shutil.rmtree(install_dir)
 
-    # Atualiza ou clona o repo
     if not update_repo(install_dir, repo_url, auto_yes):
         return 1
 
-    # Garante virtualenv
-    if not ensure_venv(venv_dir, auto_yes):
+    if not ensure_venv(venv_dir):
         return 1
 
-    # Instala dependências
     venv_python = get_venv_python(venv_dir)
     print(f"   📦 Instalando dependências...")
     if not install_deps(venv_python, install_dir):
@@ -374,25 +315,24 @@ def main() -> int:
     print("   ✅ Dependências OK")
 
     # ═══════════════════════════════════════════════════════════
-    # PASSO 7: Configurar Claude Code
+    # PASSO 6: Configurar Claude Code
     # ═══════════════════════════════════════════════════════════
-    print_step(7, total_steps, "Configurando Claude Code MCP")
+    print_step(6, total_steps, "Configurando Claude Code MCP")
     config_path = get_claude_config_path()
     print(f"   Config: {config_path}")
-    write_claude_config(config_path, venv_python, install_dir, hermes_dir)
-    print(f"   ✅ Configuração salva")
+    write_claude_config(config_path, venv_python, install_dir, remote_url)
+    print(f"   ✅ Configuração salva (HERMES_API_URL={remote_url})")
 
     # ═══════════════════════════════════════════════════════════
-    # PASSO 8: Testar
+    # PASSO 7: Testar MCP Server localmente
     # ═══════════════════════════════════════════════════════════
-    print_step(8, total_steps, "Testando instalação")
+    print_step(7, total_steps, "Testando instalação")
     print("   🧪 Rodando test_server.py...")
     test_result = run([str(venv_python), str(install_dir / "test_server.py")], timeout=120)
     if test_result.returncode == 0:
         print("   ✅ Teste passou!")
     else:
-        print("   ⚠️  Teste não passou (pode ser normal se Hermes não configurado)")
-        # Mostra só as primeiras linhas do erro
+        print("   ⚠️  Teste não passou (pode ser normal se servidor remoto não está rodando)")
         err_lines = test_result.stderr.strip().splitlines()
         if err_lines:
             print(f"   Erro: {err_lines[0][:200]}")
@@ -404,18 +344,19 @@ def main() -> int:
     print("🎉 INSTALAÇÃO CONCLUÍDA!")
     print("="*60)
     print()
-    print(f"📁 Instalação:   {install_dir}")
-    print(f"🐍 Python venv:   {venv_python}")
-    print(f"⚙️  Config Claude: {config_path}")
-    print()
-    if project_dirs:
-        print("📁 Projetos:")
-        for name, path in project_dirs.items():
-            print(f"   • {name}: {path}")
+    print(f"📁 Instalação:    {install_dir}")
+    print(f"🐍 Python venv:    {venv_python}")
+    print(f"⚙️  Config Claude:  {config_path}")
+    print(f"🌐 Servidor remoto: {remote_url}")
     print()
     print("📋 Próximos passos:")
     print("   1. REINICIE o Claude Code (feche e abra novamente)")
-    print("   2. Digite: Pergunta pro Hermes qual é o banco do KPL")
+    print("   2. No chat, digite: Pergunta pro Hermes qual é o banco do KPL")
+    print()
+    print("📝 IMPORTANTE:")
+    print("   Certifique-se de que o servidor remoto está rodando:")
+    print(f"      ssh <usuario>@{args.remote_ip}")
+    print("      cd ~/hermes-bridge && python3 remote_hermes_api.py")
     print()
     print("🔗 Repo: https://github.com/calligioni/hermes-bridge")
     return 0

@@ -1,6 +1,23 @@
-# 🔗 Hermes Bridge — MCP Server para Claude Code
+# 🔗 Hermes Bridge — MCP Server para Claude Code (Cliente Remoto)
 
-Conecta o **Claude Code** (ou Claude Desktop) ao **Hermes Agent**, permitindo que o time que usa Claude faça perguntas ao Hermes e receba respostas no mesmo chat — **com histórico de conversa persistente** entre chamadas.
+Conecta o **Claude Code** (na máquina local do time) ao **Hermes Agent** (na máquina remota 10.250.240.206), permitindo que o time faça perguntas ao Hermes e receba respostas no chat do Claude — **com histórico de conversa persistente**.
+
+---
+
+## 🏗️ Arquitetura
+
+```
+┌─────────────────────┐      HTTP POST       ┌──────────────────────────┐
+│  MÁQUINA DO TIME    │  ─────────────────▶  │  MÁQUINA REMOTA          │
+│  (Mac/Windows/Linux)│     pergunta →       │  (10.250.240.206)        │
+│                     │     resposta         │  Hermes + Código Fonte   │
+│  Claude Code ──▶    │                      │  KPL / OnclickERP /      │
+│  server.py (MCP)    │  ◀──────────────────  │  APIECOMM                │
+│  (cliente HTTP)     │                      │  remote_hermes_api.py   │
+└─────────────────────┘                      └──────────────────────────┘
+```
+
+**O Hermes NÃO roda na máquina do time.** O Hermes roda apenas na máquina remota (10.250.240.206), que tem acesso ao código fonte. O time se conecta via HTTP.
 
 ---
 
@@ -15,7 +32,7 @@ Conecta o **Claude Code** (ou Claude Desktop) ao **Hermes Agent**, permitindo qu
 | Precisa de ajuda com integração APIECOMM | ❌ | ✅ Pergunta pro Hermes |
 | Resposta mantém contexto da conversa | ❌ | ✅ Histórico persistente |
 
-O **Hermes** tem acesso a:
+O **Hermes** (na máquina remota) tem acesso a:
 - Código fonte de todos os projetos (KPL, OnclickERP, APIECOMM)
 - Graphify (grafo de conhecimento do código)
 - Skills especializadas (SQL, Delphi, .NET, React)
@@ -34,13 +51,13 @@ A forma mais fácil: o **Claude Code** faz tudo sozinho.
 O Claude vai:
 1. **Ler** o repositório e encontrar o `install.py`
 2. **Executar** o script de instalação
-3. **Perguntar** o que precisar (diretórios dos projetos, confirmações)
+3. **Perguntar** o que precisar (IP remoto, confirmações)
 4. **Configurar** o `claude_desktop_config.json`
 5. **Informar** quando estiver pronto
 
 ### Ou, se quiser modo automático (sem perguntas):
 
-> **"Roda o install.py do repo https://github.com/calligioni/hermes-bridge.git com --yes"**
+> **"Roda o install.py do repo https://github.com/calligioni/hermes-bridge.git com --yes --remote-ip 10.250.240.206"**
 
 O script vai assumir os defaults e não fazer perguntas.
 
@@ -48,45 +65,55 @@ O script vai assumir os defaults e não fazer perguntas.
 
 ## 🛠️ Instalação Manual
 
-Se preferir fazer na mão, siga os passos abaixo.
+### Na MÁQUINA REMOTA (10.250.240.206) — onde o Hermes está
 
-### Pré-requisitos
-
-Antes de começar, confirme que tem:
-
-- [ ] **Python 3.12+** instalado (`python3 --version`)
-- [ ] **Git** instalado (`git --version`)
-- [ ] **Hermes Agent** instalado e funcionando (`hermes --help`)
-- [ ] A máquina está na mesma rede que o Hermes
-- [ ] Os projetos (KPL, OnclickERP, APIECOMM) clonados localmente (opcional, mas recomendado)
-
-### Passo a passo
-
+1. Clone o repositório:
 ```bash
-# 1. Clone o repositório
 cd ~
 git clone https://github.com/calligioni/hermes-bridge.git
+```
 
-# 2. Rode o instalador interativo
+2. Inicie o servidor HTTP:
+```bash
+cd ~/hermes-bridge
+python3 remote_hermes_api.py
+```
+
+O servidor vai escutar em `0.0.0.0:8655` e aceitar conexões de qualquer máquina da rede.
+
+3. Para rodar em background (opcional):
+```bash
+nohup python3 remote_hermes_api.py > /tmp/hermes_api.log 2>&1 &
+```
+
+### Na MÁQUINA DO TIME (Mac/Windows/Linux) — onde roda Claude Code
+
+1. Clone o repositório:
+```bash
+cd ~
+git clone https://github.com/calligioni/hermes-bridge.git
+```
+
+2. Rode o instalador:
+```bash
 cd hermes-bridge
 python3 install.py
-
-# Ou, modo automático (sem perguntas):
-python3 install.py --yes
-
-# Ou, força reinstalação completa:
-python3 install.py --force
 ```
 
 O instalador vai:
 - Detectar seu SO (Linux/macOS/Windows)
-- Criar virtualenv em `~/.venv`
+- Perguntar o IP da máquina remota (padrão: 10.250.240.206)
+- Criar virtualenv
 - Instalar dependências (`mcp>=2.0.0`)
-- Perguntar os diretórios dos projetos
 - Configurar o `claude_desktop_config.json`
-- Testar a conexão
+- Testar a conexão com o servidor remoto
 
-Depois, **reinicie o Claude Code**.
+Ou modo automático:
+```bash
+python3 install.py --yes --remote-ip 10.250.240.206
+```
+
+3. Reinicie o Claude Code.
 
 ---
 
@@ -147,64 +174,42 @@ O histórico é **por sessão do Claude** — se o Claude Code reiniciar, o hist
 
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
-| `HERMES_BIN` | `hermes` | Caminho para o binário do Hermes |
-| `HERMES_MAX_TURNS` | `20` | Máximo de iterações do Hermes por pergunta |
-| `PATH` | — | **OBRIGATÓRIO** — precisa incluir o diretório do `hermes` |
-
----
-
-## 🧪 Teste standalone (sem o Claude Code)
-
-Para validar que o server está funcionando antes de configurar no Claude:
-
-```bash
-cd ~/hermes-bridge
-source .venv/bin/activate  # macOS/Linux
-# .venv\Scripts\activate  # Windows
-python test_server.py
-```
-
-Se tudo estiver OK, você verá:
-- ✅ Resposta do initialize
-- ✅ Lista de tools (`ask_hermes`, `clear_hermes_history`)
-- ✅ Resposta do Hermes à pergunta de teste
+| `HERMES_API_URL` | `http://10.250.240.206:8655` | URL do servidor remoto onde o Hermes roda |
+| `HERMES_MAX_TURNS` | `20` | Máximo de iterações do Hermes por pergunta (no servidor) |
 
 ---
 
 ## 🔧 Troubleshooting
 
-### "hermes: command not found"
-**Causa:** O `PATH` no `claude_desktop_config.json` não inclui o diretório do `hermes`.
+### "Não consegui conectar ao servidor remoto"
+**Causa:** O servidor remoto (`remote_hermes_api.py`) não está rodando na máquina 10.250.240.206.
 
 **Solução:**
-1. Descubra onde está o hermes: `which hermes`
-2. Se não retornar nada, procure: `find ~ -name "hermes" -type f 2>/dev/null`
-3. Adicione o diretório ao PATH no JSON de configuração
+1. SSH para a máquina remota: `ssh usuario@10.250.240.206`
+2. Verifique se o servidor está rodando:
+   ```bash
+   curl http://localhost:8655/health
+   ```
+3. Se não responder, inicie o servidor:
+   ```bash
+   cd ~/hermes-bridge
+   python3 remote_hermes_api.py
+   ```
+
+### "hermes: command not found" (no servidor remoto)
+**Causa:** O Hermes não está instalado ou não está no PATH da máquina remota.
+
+**Solução:** Instale o Hermes na máquina remota: https://hermes-agent.nousresearch.com/docs/
 
 ### "Timeout" ou resposta vazia
 **Causas:**
-- A máquina do Hermes está sobrecarregada
+- A máquina remota está sobrecarregada
 - A pergunta é muito complexa
+- Problemas de rede entre as máquinas
 
 **Soluções:**
-- Reduza `HERMES_MAX_TURNS` para `10` no JSON de configuração
-- Faça perguntas mais específicas
-- Verifique se a máquina tem recursos suficientes
-
-### "Erro ao inicializar MCP server"
-**Causas:**
-- Python não está instalado ou é versão antiga (< 3.12)
-- Virtualenv não foi criado corretamente
-- Dependências não foram instaladas
-
-**Soluções:**
-```bash
-cd ~/hermes-bridge
-rm -rf .venv
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+- Verifique conectividade: `ping 10.250.240.206`
+- Teste a porta: `curl http://10.250.240.206:8655/health`
 
 ### O Claude não chama a tool automaticamente
 **Solução:** Seja mais explícito no prompt:
@@ -212,18 +217,8 @@ pip install -r requirements.txt
 Use a tool ask_hermes para perguntar: [sua pergunta aqui]
 ```
 
-### "ModuleNotFoundError: No module named 'mcp'"
-**Causa:** O virtualenv não foi ativado ou as dependências não foram instaladas.
-
-**Solução:**
-```bash
-cd ~/hermes-bridge
-source .venv/bin/activate
-pip install mcp
-```
-
 ### macOS: "python3: command not found"
-**Solução:** O macOS não vem com Python 3.12+ por padrão. Instale via Homebrew:
+**Solução:** Instale Python 3.12+ via Homebrew:
 ```bash
 brew install python@3.12
 ```
@@ -240,11 +235,13 @@ xcode-select --install
 
 ```
 hermes-bridge/
-├── .gitignore              # Ignora .venv, __pycache__, etc.
-├── install.py              # ⭐ Script de instalação automática
-├── server.py               # MCP Server principal (o Claude inicia isso)
+├── remote_hermes_api.py    # ⭐ Servidor HTTP (roda na máquina remota 10.250.240.206)
+├── server.py               # MCP Server cliente (roda na máquina do time, conecta via HTTP)
+├── install.py              # Script de instalação automática (roda na máquina do time)
 ├── test_server.py          # Teste standalone
-├── requirements.txt        # Dependências Python (só mcp>=2.0.0)
+├── requirements.txt        # Dependências Python (mcp>=2.0.0)
+├── push-to-github.sh       # Script auxiliar para push
+├── .gitignore              # Ignora .venv, __pycache__, etc.
 └── README.md               # Este arquivo
 ```
 
@@ -252,11 +249,11 @@ hermes-bridge/
 
 ## 📝 Notas Técnicas
 
-- O MCP server roda como **stdio** (entrada/saída padrão), iniciado automaticamente pelo Claude Code
-- Não precisa de servidor web ou porta aberta — comunicação é local via pipes
-- O histórico fica **apenas em memória** — se o processo do MCP server morrer, o histórico é perdido
-- Cada instância do server é isolada — duas sessões do Claude Code não compartilham histórico
-- O `install.py` é **idempotente** — pode rodar de novo que ele atualiza o que precisa
+- **Máquina remota (10.250.240.206):** Roda `remote_hermes_api.py` — um servidor HTTP simples que recebe perguntas via POST e delega ao Hermes local.
+- **Máquina do time:** Roda `server.py` como MCP Server do Claude Code — é um cliente HTTP que se conecta ao servidor remoto.
+- **Comunicação:** HTTP POST entre as máquinas. Porta padrão: 8655.
+- **Segurança:** O servidor escuta em `0.0.0.0` (todas as interfaces). Certifique-se de que a rede interna é segura.
+- **O histórico fica apenas em memória** — se o processo do MCP server morrer, o histórico é perdido.
 
 ---
 
@@ -264,8 +261,8 @@ hermes-bridge/
 
 Se nenhuma das soluções de troubleshooting funcionar:
 
-1. Rode o teste standalone: `python test_server.py`
-2. Verifique a saúde do Hermes: `hermes doctor`
+1. Teste o servidor remoto: `curl http://10.250.240.206:8655/health`
+2. Verifique a saúde do Hermes na máquina remota: `hermes doctor`
 3. Verifique os logs do Claude Code:
    - **macOS:** `~/Library/Application Support/Claude/logs/`
    - **Linux:** `~/.config/claude/logs/`
@@ -276,33 +273,38 @@ Se nenhuma das soluções de troubleshooting funcionar:
 
 ## 🔄 Atualizando
 
-Para atualizar para a versão mais recente:
-
+### Na máquina do time:
 ```bash
 cd ~/hermes-bridge
 git pull
-source .venv/bin/activate
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
 ```
 
-Ou simplesmente rode o `install.py` de novo — ele faz `git pull` automaticamente.
+### Na máquina remota:
+```bash
+cd ~/hermes-bridge
+git pull
+# Reinicie o remote_hermes_api.py
+```
 
-Depois reinicie o Claude Code.
+Depois reinicie o Claude Code na máquina do time.
 
 ---
 
 ## 🏗️ Compatibilidade
 
-| Sistema | Status | Notas |
-|---------|--------|-------|
-| Linux | ✅ Testado | Caminho config: `~/.config/claude/` |
-| macOS | ✅ Suportado | Caminho config: `~/Library/Application Support/Claude/` |
-| Windows | ✅ Suportado | Caminho config: `%APPDATA%\Claude\` |
+| Componente | Linux | macOS | Windows |
+|-----------|-------|-------|---------|
+| `remote_hermes_api.py` (servidor) | ✅ | ✅ | ✅ |
+| `server.py` (cliente MCP) | ✅ | ✅ | ✅ |
+| `install.py` (instalador) | ✅ | ✅ | ✅ |
 
 **Requisitos mínimos:**
 - Python 3.12+
 - Git
-- Hermes Agent instalado
+- Rede entre as máquinas (mesma rede ou VPN)
 
 ---
 

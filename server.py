@@ -1,101 +1,75 @@
 #!/usr/bin/env python3
 """
-Hermes Bridge MCP Server — MCP 2.x
-===================================
-Conecta Claude Code ao Hermes Agent via Model Context Protocol.
+Hermes Bridge MCP Server — Cliente Remoto
+==========================================
+Roda na máquina do time (Mac/Windows/Linux) que usa Claude Code.
 
-O Claude Code inicia este servidor automaticamente via stdio.
-Cada sessão do Claude = uma instância deste servidor = histórico isolado.
+Este MCP Server NÃO roda o Hermes localmente. Ele é um cliente HTTP que
+envia perguntas para um servidor remoto (ex: http://10.250.240.206:8655)
+onde o Hermes está instalado com acesso ao código fonte.
 
 Uso no Claude Code:
   "Pergunta pro Hermes qual é o banco principal do KPL"
-  → Claude chama a tool `ask_hermes`
-  → Hermes processa e responde
-  → Resposta aparece no chat do Claude
+  → Claude chama a tool ask_hermes
+  → Este server faz POST para o servidor remoto
+  → O servidor remoto roda hermes chat -q
+  → Resposta volta pelo HTTP → aparece no chat do Claude
+
+Configuração via variável de ambiente HERMES_API_URL (padrão: http://10.250.240.206:8655).
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 import os
-import subprocess
-from pathlib import Path
+import urllib.request
+import urllib.error
 from typing import Annotated
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import TextContent
 
 # ─── Configuração ─────────────────────────────────────────────────────────────
-HERMES_BIN = os.environ.get("HERMES_BIN", "hermes")
-MAX_TURNS = int(os.environ.get("HERMES_MAX_TURNS", "20"))
+HERMES_API_URL = os.environ.get(
+    "HERMES_API_URL",
+    "http://10.250.240.206:8655"
+).rstrip("/")
 
 # ─── Estado por sessão ────────────────────────────────────────────────────────
-# Cada instância do servidor MCP = uma sessão do Claude → histórico isolado.
 _HISTORY: list[dict] = []  # [{"role": "user"/"assistant", "content": "..."}]
-_MAX_HISTORY_LEN = 20      # 10 turnos (user + assistant)
+_MAX_HISTORY_LEN = 20      # 10 turnos
 
 
-def _call_hermes(prompt: str, project_dir: str = "") -> str:
-    """Executa `hermes chat -q` e retorna a resposta limpa."""
-    cwd = project_dir if project_dir and Path(project_dir).exists() else None
+def _call_remote_hermes(prompt: str, project_dir: str = "") -> str:
+    """Faz POST para o servidor remoto e retorna a resposta."""
+    url = f"{HERMES_API_URL}/ask"
+    payload = json.dumps({
+        "prompt": prompt,
+        "project_dir": project_dir,
+    }).encode("utf-8")
 
-    cmd = [
-        HERMES_BIN,
-        "chat",
-        "-q", prompt,
-        "--quiet",
-        "--source", "tool",
-        "--max-turns", str(MAX_TURNS),
-    ]
-    if cwd:
-        cmd.extend(["--in", str(cwd)])
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
 
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            env={**os.environ, "FORCE_COLOR": "0", "NO_COLOR": "1"},
-        )
-    except subprocess.TimeoutExpired:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("response", "[ERRO] Resposta vazia do servidor remoto")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else ""
+        return f"[ERRO] Servidor remoto retornou {e.code}: {body[:500]}"
+    except urllib.error.URLError as e:
         return (
-            "[ERRO] O Hermes demorou mais de 5 minutos para responder. "
-            "Tente uma pergunta mais específica."
+            f"[ERRO] Não consegui conectar ao servidor remoto em {HERMES_API_URL}. "
+            f"Verifique se a máquina remota está acessível e o servidor está rodando. "
+            f"Detalhes: {e.reason}"
         )
-    except FileNotFoundError:
-        return (
-            f"[ERRO] Comando '{HERMES_BIN}' não encontrado. "
-            "Verifique se o Hermes está instalado e no PATH."
-        )
-
-    output = result.stdout.strip()
-
-    # Remove o cabeçalho "session_id: XXX" que o --quiet às vezes imprime
-    if "session_id:" in output:
-        lines = output.splitlines()
-        # session_id costuma estar nas primeiras linhas
-        filtered = []
-        skip = True
-        for line in lines:
-            if skip and line.startswith("session_id:"):
-                skip = False
-                continue
-            if skip and not line.strip():
-                continue
-            skip = False
-            filtered.append(line)
-        output = "\n".join(filtered).strip()
-
-    if result.returncode != 0:
-        err = result.stderr.strip() or output or "Erro desconhecido"
-        return f"[ERRO] Hermes retornou código {result.returncode}: {err}"
-
-    if not output:
-        return "[ERRO] Hermes não retornou nenhuma resposta."
-
-    return output
+    except Exception as e:
+        return f"[ERRO] Falha na comunicação com servidor remoto: {e}"
 
 
 def _build_prompt(question: str, extra_context: str = "") -> str:
@@ -121,8 +95,8 @@ def _build_prompt(question: str, extra_context: str = "") -> str:
 server = MCPServer(
     name="hermes-bridge",
     title="Hermes Bridge",
-    description="Conecta Claude Code ao Hermes Agent para análise profunda de código.",
-    version="1.0.0",
+    description="Conecta Claude Code ao Hermes Agent remoto para análise profunda de código.",
+    version="2.0.0",
 )
 
 
@@ -141,16 +115,12 @@ def ask_hermes(
     context: Annotated[str, "Contexto adicional (opcional). Ex: caminho de arquivo, trecho de código, erro."] = "",
     project_dir: Annotated[str, "Diretório base do projeto (opcional). Ex: /home/onclick/KPL, /home/onclick/OnclickERP, /home/onclick/apiecomm"] = "",
 ) -> list[TextContent]:
-    """Pergunta algo ao Hermes e retorna a resposta no chat do Claude."""
+    """Pergunta algo ao Hermes remoto e retorna a resposta no chat do Claude."""
     global _HISTORY
 
-    # Monta prompt com histórico
     full_prompt = _build_prompt(question, context)
+    response = _call_remote_hermes(full_prompt, project_dir)
 
-    # Chama o Hermes
-    response = _call_hermes(full_prompt, project_dir)
-
-    # Atualiza histórico
     _HISTORY.append({"role": "user", "content": question})
     _HISTORY.append({"role": "assistant", "content": response})
     if len(_HISTORY) > _MAX_HISTORY_LEN:
