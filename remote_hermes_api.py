@@ -25,7 +25,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 HERMES_BIN = os.environ.get("HERMES_BIN", "hermes")
-MAX_TURNS = int(os.environ.get("HERMES_MAX_TURNS", "20"))
+MAX_TURNS = int(os.environ.get("HERMES_MAX_TURNS", "40"))
 API_PORT = int(os.environ.get("HERMES_API_PORT", "8655"))
 CACHE_TTL_MINUTES = int(os.environ.get("HERMES_CACHE_TTL", "60"))
 CACHE_MAX_SIZE = int(os.environ.get("HERMES_CACHE_SIZE", "100"))
