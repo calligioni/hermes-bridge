@@ -17,7 +17,7 @@ Conecta o **Claude Code** (ou Claude Desktop) ao **Hermes Agent**, permitindo qu
 O **Hermes** tem acesso a:
 - Código fonte de todos os projetos (KPL, OnclickERP, APIECOMM)
 - Graphify (grafo de conhecimento do código)
-- Skills especializadas (SQL, Delphi, .NET)
+- Skills especializadas (SQL, Delphi, .NET, React)
 - Memória persistente entre sessões
 
 ---
@@ -113,6 +113,12 @@ Contexto: estou trabalhando no módulo de expedição do KPL.
 ```
 Pergunta pro Hermes sobre a estrutura de menus do BackOffice.
 Diretório: /home/onclick/OnclickERP
+```
+
+### Perguntando sobre APIECOMM
+```
+Pergunta pro Hermes: qual é o endpoint que sincroniza produtos com a plataforma?
+Diretório: /home/onclick/apiecomm
 ```
 
 ### Limpando o histórico

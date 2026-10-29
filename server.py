@@ -132,14 +132,14 @@ server = MCPServer(
         "Envia uma pergunta ao Hermes Agent (agente com acesso ao código fonte, "
         "graphify, skills e memória persistente). Use quando precisar de análise "
         "profunda do codebase, localização de procedures, entendimento de arquitetura, "
-        "ou qualquer coisa relacionada aos projetos KPL/OnclickERP/APIECOMM. "
+        "ou qualquer coisa relacionada aos projetos KPL / OnclickERP / APIECOMM. "
         "O Hermes mantém histórico de conversa entre chamadas na mesma sessão."
     ),
 )
 def ask_hermes(
     question: Annotated[str, "A pergunta ou tarefa para o Hermes. Ex: 'Qual o banco principal do KPL?'"],
     context: Annotated[str, "Contexto adicional (opcional). Ex: caminho de arquivo, trecho de código, erro."] = "",
-    project_dir: Annotated[str, "Diretório base do projeto (opcional). Ex: /home/onclick/KPL, /home/onclick/OnclickERP"] = "",
+    project_dir: Annotated[str, "Diretório base do projeto (opcional). Ex: /home/onclick/KPL, /home/onclick/OnclickERP, /home/onclick/apiecomm"] = "",
 ) -> list[TextContent]:
     """Pergunta algo ao Hermes e retorna a resposta no chat do Claude."""
     global _HISTORY
