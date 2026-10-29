@@ -23,246 +23,74 @@ O **Hermes** tem acesso a:
 
 ---
 
-## ⚠️ Antes de começar — perguntas importantes
+## 🚀 Instalação Automática (RECOMENDADO)
 
-Antes de instalar, verifique se você responde **SIM** a todas estas perguntas:
+A forma mais fácil: o **Claude Code** faz tudo sozinho.
 
-### 1. A máquina que roda Claude Code está na mesma rede que a máquina do Hermes?
-- [ ] Sim, estão na mesma rede local / VPN / rede interna
-- [ ] Não → **NÃO** vai funcionar. O Hermes Bridge precisa conseguir executar o comando `hermes` localmente.
+### No chat do Claude Code, diga:
 
-> **Exemplo:** Se o Hermes roda em `192.168.1.50` e seu Claude Code está em `192.168.1.30`, OK. Se o Hermes é remoto (AWS, outra rede), você precisa de outra solução (fale com o time de infra).
+> **"Instala pra mim o repositório https://github.com/calligioni/hermes-bridge.git"**
 
-### 2. O Hermes está instalado e funcionando nesta máquina?
-- [ ] Sim, consigo rodar `hermes --help` no terminal
-- [ ] Não → Instale o Hermes primeiro: https://hermes-agent.nousresearch.com/docs/
+O Claude vai:
+1. **Ler** o repositório e encontrar o `install.py`
+2. **Executar** o script de instalação
+3. **Perguntar** o que precisar (diretórios dos projetos, confirmações)
+4. **Configurar** o `claude_desktop_config.json`
+5. **Informar** quando estiver pronto
 
-### 3. Qual é o caminho do diretório HOME do usuário nesta máquina?
-- [ ] Linux/macOS: `/home/SEU_USUARIO` (ex: `/home/joao`, `/Users/maria`)
-- [ ] Windows: `C:\Users\SEU_USUARIO`
+### Ou, se quiser modo automático (sem perguntas):
 
-> Você precisa saber isso para configurar os caminhos no `claude_desktop_config.json`.
+> **"Roda o install.py do repo https://github.com/calligioni/hermes-bridge.git com --yes"**
 
-### 4. O Python 3.12+ está instalado?
-- [ ] Sim: `python3 --version` retorna 3.12 ou superior
-- [ ] Não → Instale Python 3.12+ primeiro
-
-### 5. O Git está instalado?
-- [ ] Sim: `git --version` funciona no terminal
-- [ ] Não → Instale o Git primeiro
-
-### 6. Você tem permissão para criar pastas em `$HOME`?
-- [ ] Sim
-- [ ] Não → Peça permissão ao administrador
-
-### 7. Qual é o seu sistema operacional?
-- [ ] Linux
-- [ ] macOS
-- [ ] Windows
-
-> Cada SO tem caminhos diferentes para o arquivo de configuração do Claude.
-
-### 8. Os projetos (KPL, OnclickERP, APIECOMM) estão clonados nesta máquina?
-- [ ] Sim, em `/home/SEU_USUARIO/KPL`, `/home/SEU_USUARIO/OnclickERP`, `/home/SEU_USUARIO/apiecomm`
-- [ ] Não → O Hermes precisa acessar os códigos fonte localmente
+O script vai assumir os defaults e não fazer perguntas.
 
 ---
 
-## 🚀 Instalação Completa (passo a passo)
+## 🛠️ Instalação Manual
 
-### Passo 1: Clone o repositório
+Se preferir fazer na mão, siga os passos abaixo.
 
-Abra um terminal na máquina onde roda o Claude Code e execute:
+### Pré-requisitos
+
+Antes de começar, confirme que tem:
+
+- [ ] **Python 3.12+** instalado (`python3 --version`)
+- [ ] **Git** instalado (`git --version`)
+- [ ] **Hermes Agent** instalado e funcionando (`hermes --help`)
+- [ ] A máquina está na mesma rede que o Hermes
+- [ ] Os projetos (KPL, OnclickERP, APIECOMM) clonados localmente (opcional, mas recomendado)
+
+### Passo a passo
 
 ```bash
+# 1. Clone o repositório
 cd ~
 git clone https://github.com/calligioni/hermes-bridge.git
-# OU, se preferir outro nome de pasta:
-git clone https://github.com/calligioni/hermes-bridge.git claude-hermes-bridge
+
+# 2. Rode o instalador interativo
+cd hermes-bridge
+python3 install.py
+
+# Ou, modo automático (sem perguntas):
+python3 install.py --yes
+
+# Ou, força reinstalação completa:
+python3 install.py --force
 ```
 
-**Verifique se funcionou:**
-```bash
-ls ~/hermes-bridge  # ou ~/claude-hermes-bridge
-# Deve mostrar: server.py, test_server.py, requirements.txt, README.md
-```
+O instalador vai:
+- Detectar seu SO (Linux/macOS/Windows)
+- Criar virtualenv em `~/.venv`
+- Instalar dependências (`mcp>=2.0.0`)
+- Perguntar os diretórios dos projetos
+- Configurar o `claude_desktop_config.json`
+- Testar a conexão
 
-> **⚠️ IMPORTANTE:** Se você mudou o nome da pasta na hora do clone, lembre-se de usar o novo nome em todos os comandos abaixo.
+Depois, **reinicie o Claude Code**.
 
 ---
 
-### Passo 2: Descubra o caminho do Python na sua máquina
-
-```bash
-which python3
-# Exemplo de resposta: /usr/bin/python3
-```
-
-Guarde esse caminho — você vai precisar dele no Passo 5.
-
----
-
-### Passo 3: Crie o virtualenv e instale dependências
-
-```bash
-cd ~/hermes-bridge  # ou ~/claude-hermes-bridge
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-**Verifique se funcionou:**
-```bash
-ls .venv/bin/python
-# Deve mostrar o caminho do Python no virtualenv
-```
-
-**Caminho que você vai usar no Passo 5:**
-- Se clonou como `hermes-bridge`: `~/hermes-bridge/.venv/bin/python`
-- Se clonou como `claude-hermes-bridge`: `~/claude-hermes-bridge/.venv/bin/python`
-
----
-
-### Passo 4: Descubra onde está o binário `hermes`
-
-```bash
-which hermes
-# Exemplo de resposta: /home/onclick/.local/bin/hermes
-```
-
-**Descubra o diretório:**
-```bash
-dirname $(which hermes)
-# Exemplo de resposta: /home/onclick/.local/bin
-```
-
-Guarde esse diretório — você precisa incluir ele no `PATH` do Passo 5.
-
-> **Se `which hermes` não retornar nada:** O Hermes não está no PATH. Descubra onde ele está instalado (talvez em `~/.local/bin/hermes` ou `/usr/local/bin/hermes`).
-
----
-
-### Passo 5: Configure o Claude Code
-
-Agora você precisa editar o arquivo de configuração MCP do Claude Code.
-
-#### Encontre o arquivo de configuração no seu sistema:
-
-| Sistema Operacional | Caminho do arquivo |
-|---------------------|-------------------|
-| **Linux** | `~/.config/claude/claude_desktop_config.json` |
-| **macOS** | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| **Windows** | `%APPDATA%\Claude\claude_desktop_config.json` |
-
-#### Crie ou edite o arquivo:
-
-Se o arquivo **não existir**, crie ele. Se já existir, **adicione** a seção `hermes-bridge` dentro de `mcpServers`.
-
-**Conteúdo completo (se o arquivo não existir):**
-
-```json
-{
-  "mcpServers": {
-    "hermes-bridge": {
-      "command": "CAMINHO_DO_PYTHON_NO_VENV",
-      "args": ["CAMINHO_DO_SERVER_PY"],
-      "env": {
-        "HERMES_BIN": "hermes",
-        "HERMES_MAX_TURNS": "20",
-        "PATH": "SEU_PATH_ATUAL:DIRETORIO_DO_HERMES"
-      }
-    }
-  }
-}
-```
-
-**Substitua os valores (exemplo real para Linux):**
-
-```json
-{
-  "mcpServers": {
-    "hermes-bridge": {
-      "command": "/home/joao/hermes-bridge/.venv/bin/python",
-      "args": ["/home/joao/hermes-bridge/server.py"],
-      "env": {
-        "HERMES_BIN": "hermes",
-        "HERMES_MAX_TURNS": "20",
-        "PATH": "/usr/local/bin:/usr/bin:/bin:/home/joao/.local/bin"
-      }
-    }
-  }
-}
-```
-
-**Substitua os valores (exemplo real para macOS):**
-
-```json
-{
-  "mcpServers": {
-    "hermes-bridge": {
-      "command": "/Users/maria/hermes-bridge/.venv/bin/python",
-      "args": ["/Users/maria/hermes-bridge/server.py"],
-      "env": {
-        "HERMES_BIN": "hermes",
-        "HERMES_MAX_TURNS": "20",
-        "PATH": "/usr/local/bin:/usr/bin:/bin:/Users/maria/.local/bin"
-      }
-    }
-  }
-}
-```
-
-**Substitua os valores (exemplo real para Windows):**
-
-```json
-{
-  "mcpServers": {
-    "hermes-bridge": {
-      "command": "C:\\Users\\joao\\hermes-bridge\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\Users\\joao\\hermes-bridge\\server.py"],
-      "env": {
-        "HERMES_BIN": "hermes",
-        "HERMES_MAX_TURNS": "20",
-        "PATH": "C:\\Users\\joao\\.local\\bin;C:\\Windows\\System32"
-      }
-    }
-  }
-}
-```
-
-> **⚠️ ATENÇÃO:** Substitua `joao`/`maria` pelo seu nome de usuário REAL. O PATH precisa incluir o diretório onde o `hermes` está instalado.
-
----
-
-### Passo 6: Reinicie o Claude Code
-
-Feche completamente o Claude Code (Ctrl+Q / Cmd+Q) e abra novamente.
-
-O Claude Code vai detectar automaticamente o MCP Server na inicialização.
-
----
-
-### Passo 7: Teste!
-
-No chat do Claude Code, digite:
-
-```
-Pergunta pro Hermes: qual é o banco de dados principal do KPL?
-```
-
-O Claude deve:
-1. Detectar que existe uma tool `ask_hermes`
-2. Chamar a tool com a sua pergunta
-3. Mostrar a resposta do Hermes no chat
-
-**Se o Claude não chamar automaticamente**, seja mais explícito:
-```
-Use a tool ask_hermes para perguntar: qual é o banco de dados principal do KPL?
-```
-
----
-
-## 📖 Exemplos de uso no Claude Code
+## 📖 Como usar no Claude Code
 
 ### Perguntas simples (KPL)
 ```
@@ -330,8 +158,9 @@ O histórico é **por sessão do Claude** — se o Claude Code reiniciar, o hist
 Para validar que o server está funcionando antes de configurar no Claude:
 
 ```bash
-cd ~/hermes-bridge  # ou ~/claude-hermes-bridge
-source .venv/bin/activate
+cd ~/hermes-bridge
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate  # Windows
 python test_server.py
 ```
 
@@ -349,7 +178,7 @@ Se tudo estiver OK, você verá:
 
 **Solução:**
 1. Descubra onde está o hermes: `which hermes`
-2. Se não retornar nada, procure: `find /home -name "hermes" -type f 2>/dev/null`
+2. Se não retornar nada, procure: `find ~ -name "hermes" -type f 2>/dev/null`
 3. Adicione o diretório ao PATH no JSON de configuração
 
 ### "Timeout" ou resposta vazia
@@ -393,8 +222,17 @@ source .venv/bin/activate
 pip install mcp
 ```
 
-### Resposta vem com "session_id:" ou texto estranho
-**Isso é normal** em alguns casos — o server.py já filtra isso, mas se persistir, atualize o repositório para a versão mais recente.
+### macOS: "python3: command not found"
+**Solução:** O macOS não vem com Python 3.12+ por padrão. Instale via Homebrew:
+```bash
+brew install python@3.12
+```
+
+### macOS: "git: command not found"
+**Solução:** Instale o Xcode Command Line Tools:
+```bash
+xcode-select --install
+```
 
 ---
 
@@ -403,8 +241,9 @@ pip install mcp
 ```
 hermes-bridge/
 ├── .gitignore              # Ignora .venv, __pycache__, etc.
+├── install.py              # ⭐ Script de instalação automática
 ├── server.py               # MCP Server principal (o Claude inicia isso)
-├── test_server.py          # Script de teste standalone
+├── test_server.py          # Teste standalone
 ├── requirements.txt        # Dependências Python (só mcp>=2.0.0)
 └── README.md               # Este arquivo
 ```
@@ -417,6 +256,7 @@ hermes-bridge/
 - Não precisa de servidor web ou porta aberta — comunicação é local via pipes
 - O histórico fica **apenas em memória** — se o processo do MCP server morrer, o histórico é perdido
 - Cada instância do server é isolada — duas sessões do Claude Code não compartilham histórico
+- O `install.py` é **idempotente** — pode rodar de novo que ele atualiza o que precisa
 
 ---
 
@@ -426,7 +266,10 @@ Se nenhuma das soluções de troubleshooting funcionar:
 
 1. Rode o teste standalone: `python test_server.py`
 2. Verifique a saúde do Hermes: `hermes doctor`
-3. Verifique os logs do Claude Code em `~/.config/claude/logs/`
+3. Verifique os logs do Claude Code:
+   - **macOS:** `~/Library/Application Support/Claude/logs/`
+   - **Linux:** `~/.config/claude/logs/`
+   - **Windows:** `%APPDATA%\Claude\logs\`
 4. Abra uma issue no repositório: https://github.com/calligioni/hermes-bridge/issues
 
 ---
@@ -442,4 +285,34 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Ou simplesmente rode o `install.py` de novo — ele faz `git pull` automaticamente.
+
 Depois reinicie o Claude Code.
+
+---
+
+## 🏗️ Compatibilidade
+
+| Sistema | Status | Notas |
+|---------|--------|-------|
+| Linux | ✅ Testado | Caminho config: `~/.config/claude/` |
+| macOS | ✅ Suportado | Caminho config: `~/Library/Application Support/Claude/` |
+| Windows | ✅ Suportado | Caminho config: `%APPDATA%\Claude\` |
+
+**Requisitos mínimos:**
+- Python 3.12+
+- Git
+- Hermes Agent instalado
+
+---
+
+## 📄 Licença
+
+MIT License — veja o arquivo [LICENSE](LICENSE) para detalhes.
+
+---
+
+## 🔗 Links
+
+- Repositório: https://github.com/calligioni/hermes-bridge
+- Hermes Agent: https://hermes-agent.nousresearch.com/docs/
