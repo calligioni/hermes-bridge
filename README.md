@@ -21,6 +21,17 @@ Conecta o **Claude Code** (na máquina local do time) ao **Hermes Agent** (na m�
 
 ---
 
+## ✨ Recursos
+
+| Recurso | Descrição |
+|---------|-----------|
+| 🧠 **Respostas do Hermes** | Acesso completo ao código fonte, graphify, skills e memória |
+| 💬 **Histórico de conversa** | Contexto persistente entre perguntas na mesma sessão |
+| ⚡ **Cache de respostas** | Perguntas repetidas respondem em ~0.02s (vs 5-30s) |
+| 🔄 **Controle de versão** | Avisa automaticamente se o cliente estiver desatualizado |
+
+---
+
 ## 📋 O que isso faz
 
 | Cenário | Sem o Bridge | Com o Bridge |
@@ -273,6 +284,22 @@ Se nenhuma das soluções de troubleshooting funcionar:
 
 ## 🔄 Atualizando
 
+### Controle de Versão Automático
+
+O Hermes Bridge tem controle de versão entre servidor e cliente:
+- **Servidor** envia sua versão em toda resposta
+- **Cliente** compara com sua versão local
+- Se divergirem, aparece um aviso no chat: `⚠️ ATUALIZAÇÃO DISPONÍVEL`
+
+Para atualizar, rode na máquina do time:
+```bash
+cd ~/hermes-bridge
+git pull
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
+pip install -r requirements.txt
+```
+
 ### Na máquina do time:
 ```bash
 cd ~/hermes-bridge
@@ -290,6 +317,36 @@ git pull
 ```
 
 Depois reinicie o Claude Code na máquina do time.
+
+---
+
+## 📋 Controle de Versão
+
+| Componente | Versão Atual | Arquivo |
+|-----------|---------------|---------|
+| Servidor (`remote_hermes_api.py`) | 2.1.0 | `VERSION` |
+| Cliente (`server.py`) | 2.1.0 | `VERSION` |
+
+### Como funciona:
+1. Servidor lê `VERSION` no startup e envia via header `X-Server-Version`
+2. Cliente lê `VERSION` no startup e compara com a versão do servidor
+3. Se `CLIENT_VERSION != SERVER_VERSION`, mostra aviso no chat
+4. O aviso aparece **apenas uma vez por sessão** do Claude Code
+
+### Endpoints do servidor:
+```bash
+# Ver versão do servidor
+curl http://10.250.240.206:8655/version
+# → {"version": "2.1.0"}
+
+# Ver health + cache + versão
+curl http://10.250.240.206:8655/health
+# → {"status": "ok", "version": "2.1.0", "cache": {...}}
+
+# Limpar cache manualmente
+curl http://10.250.240.206:8655/cache/clear
+# → {"status": "cache cleared"}
+```
 
 ---
 
